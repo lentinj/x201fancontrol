@@ -1,0 +1,40 @@
+#!/bin/bash
+# x201fancontrol: Control the fan when the ME stops sending temperature reports
+#
+# Copyright (C) 2020 Jamie Lentin <jm@lentin.co.uk>
+set -eu
+
+if [ "${1-}" = "--install" ]; then
+    cat <<EOF > /etc/systemd/system/$(basename $0).service
+[Unit]
+Description=Fan control daemon
+
+[Service]
+ExecStart=$(realpath $0)
+
+[Install]
+WantedBy=sysinit.target
+EOF
+    systemctl daemon-reload
+    systemctl enable $(basename $0).service
+    systemctl restart $(basename $0).service
+    exit 0
+fi
+
+[ "${1-}" = "--debug" ] && DEBUG=1
+
+function cleanup() {
+    echo level 7 > /proc/acpi/ibm/fan
+    echo watchdog 0 > /proc/acpi/ibm/fan
+}
+trap cleanup EXIT
+
+echo level 7 > /proc/acpi/ibm/fan
+echo watchdog 90 > /proc/acpi/ibm/fan
+while sleep 60; do
+    temp="$(cat /sys/devices/platform/coretemp*/hwmon/hwmon*/temp*_input | sort -rn | head -1)"
+    level="$(( $temp / 5000 - 7 ))"
+    level="$(( ${level} > 7 ? 7 : ${level} < 0 ? 0 : ${level} ))"
+    [ -n "${DEBUG-}" ] && echo $temp : $level
+    echo level $level > /proc/acpi/ibm/fan
+done
